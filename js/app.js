@@ -1,0 +1,606 @@
+/* =========================================================================
+   EGRAN · Herramienta Comercial — App principal
+   Sin frameworks, sin build. Routing por hash. Todo corre en el navegador.
+   ========================================================================= */
+
+const app = document.getElementById("app");
+const WA_BASE = "https://wa.me/" + (CONFIG.whatsappNumero || "");
+
+// ---------------------------------------------------------------- RENDER DE BLOQUES
+
+function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function renderBloque(b, ctxId, liveData) {
+  switch (b.t) {
+    case "p": return `<p class="blk-p">${esc(b.x)}</p>`;
+    case "label": return `<div class="blk-label">${esc(b.x)}</div>`;
+    case "bullets": return `<ul class="blk-bullets">${b.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>`;
+    case "quote": return `<blockquote class="blk-quote">“${esc(b.x)}”${b.by ? `<cite>— ${esc(b.by)}</cite>` : ""}</blockquote>`;
+    case "callout": return `<div class="blk-callout ${b.kind === "warning" ? "warn" : "tip"}">
+        <span class="blk-callout-ic">${b.kind === "warning" ? "⚠" : "🧠"}</span>
+        <div><strong>${esc(b.title)}</strong> — ${esc(b.x)}</div>
+      </div>`;
+    case "table": return `<div class="blk-table-wrap"><table class="blk-table">
+        <thead><tr>${b.headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+        <tbody>${b.rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>`;
+    case "objecion": return renderObjecionAcordeon(b.nombre, b.detras, b.responder, b.dialogo, b.testimonio, ctxId + "_" + b.nombre.slice(0, 10));
+    case "objeciones-dinamicas": return (liveData && liveData.objeciones ? liveData.objeciones : [])
+      .map(o => renderObjecionAcordeon(o.objecion, o.detras, o.responder, o.ejemplo, { texto: o.testimonioTexto, autor: o.testimonioAutor }, ctxId))
+      .join("");
+    case "matriz-dinamica": return renderMatrizTabla(liveData && liveData.matriz ? liveData.matriz : []);
+    case "timeline": return `<div class="timeline">${b.steps.map((s, i) => `
+        <div class="timeline-step">
+          <div class="timeline-dot">${i + 1}</div>
+          <div class="timeline-content"><b>${esc(s.label)}</b><small>${esc(s.detail)}</small></div>
+        </div>`).join("")}</div>`;
+    default: return "";
+  }
+}
+
+function renderMatrizTabla(filas) {
+  return `<div class="blk-table-wrap"><table class="blk-table">
+      <thead><tr><th>Situación</th><th>% desc. máximo</th><th>Logística</th><th>Forma de pago</th><th>Volumen mínimo</th></tr></thead>
+      <tbody>${filas.map(f => `<tr><td>${esc(f.situacion)}</td><td>${esc(f.descuento)}</td><td>${esc(f.logistica)}</td><td>${esc(f.pago)}</td><td>${esc(f.volumen)}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+function renderSeccionCompleta(sec, liveData) {
+  const leida = seccionEstaLeida(sec.id);
+  return `
+    <div class="seccion-card" id="sec-${sec.id}">
+      <div class="seccion-head">
+        <span class="seccion-num">${sec.id.match(/^\d/) ? sec.id : ""}</span>
+        <h3>${esc(sec.titulo)}</h3>
+        <button class="leida-btn ${leida ? "on" : ""}" data-marcar="${sec.id}" title="${leida ? "Marcar como no leída" : "Marcar como leída"}">${leida ? "✓ Leída" : "Marcar leída"}</button>
+      </div>
+      <div class="seccion-body">${sec.contenido.map(b => renderBloque(b, sec.id, liveData)).join("")}</div>
+    </div>`;
+}
+
+let objAccCounter = 0;
+function renderObjecionAcordeon(nombre, detras, responder, dialogo, testimonio, key) {
+  objAccCounter++;
+  const domId = "obj-" + objAccCounter;
+  return `
+    <div class="acc-item" data-acc="${domId}">
+      <button class="acc-head" data-toggle="${domId}">
+        <span>“${esc(nombre)}”</span><span class="acc-arrow">▾</span>
+      </button>
+      <div class="acc-body" id="${domId}">
+        <p class="acc-label">Qué hay detrás</p><p>${esc(detras)}</p>
+        <p class="acc-label">Cómo responder</p><p>${esc(responder)}</p>
+        <div class="acc-dialogo">${esc(dialogo)}</div>
+        ${testimonio && testimonio.texto ? `<div class="acc-testimonio">🎙️ “${esc(testimonio.texto)}” <cite>— ${esc(testimonio.autor)}</cite></div>` : ""}
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- SHELL / NAV
+
+function shell(contenido, activeTab) {
+  return `
+    <div class="screen">${contenido}</div>
+    <nav class="tabbar">
+      <button class="tab ${activeTab === "home" ? "on" : ""}" data-nav="home"><span class="ic">🏠</span><span>Inicio</span></button>
+      <button class="tab ${activeTab === "aprendizaje" ? "on" : ""}" data-nav="aprendizaje"><span class="ic">📖</span><span>Aprender</span></button>
+      <button class="tab ${activeTab === "campo" ? "on" : ""}" data-nav="campo"><span class="ic">🎯</span><span>Campo</span></button>
+      <button class="tab ${activeTab === "productos" ? "on" : ""}" data-nav="productos"><span class="ic">🌾</span><span>Productos</span></button>
+      <button class="tab ${activeTab === "semana" ? "on" : ""}" data-nav="semana"><span class="ic">🗓️</span><span>Mi semana</span></button>
+      <button class="tab ${activeTab === "buscador" ? "on" : ""}" data-nav="buscador"><span class="ic">🔎</span><span>Buscar</span></button>
+    </nav>`;
+}
+
+function header(titulo, subtitulo, back) {
+  return `<header class="topbar">
+      ${back ? `<button class="back-btn" data-nav="${back}">←</button>` : ""}
+      <div><h1>${esc(titulo)}</h1>${subtitulo ? `<p>${esc(subtitulo)}</p>` : ""}</div>
+    </header>`;
+}
+
+// ---------------------------------------------------------------- HOME
+
+function screenHome() {
+  const totalSecciones = PARTES.reduce((a, p) => a + p.secciones.length, 0);
+  const leidas = Object.keys(loadStore().seccionesLeidas).length;
+  const pct = Math.round((leidas / totalSecciones) * 100);
+  const html = `
+    ${header("Hola 👋", "Tu herramienta comercial Egran, siempre a mano")}
+    <div class="home-hero">
+      <p class="home-frase">“Vendemos con la confianza de 80 años de historia, pero la ganamos de nuevo en cada reunión, escuchando primero y proponiendo después.”</p>
+    </div>
+    <div class="home-progress">
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <span>${pct}% del manual leído</span>
+    </div>
+    <div class="home-grid">
+      <button class="home-tile" data-nav="aprendizaje"><span class="ic">📖</span><b>Aprender</b><small>Leer el manual completo, parte por parte</small></button>
+      <button class="home-tile" data-nav="campo"><span class="ic">🎯</span><b>Modo Campo</b><small>¿Qué estás por hacer ahora?</small></button>
+      <button class="home-tile" data-nav="semana"><span class="ic">🗓️</span><b>Mi semana</b><small>Rutina, semáforo y objeciones</small></button>
+      <button class="home-tile" data-nav="buscador"><span class="ic">🔎</span><b>Buscar</b><small>Encontrá cualquier tema al toque</small></button>
+      <button class="home-tile home-tile-ancho" data-nav="productos"><span class="ic">🌾</span><div><b>Productos</b><small>Del campo al plato: origen, usos, cuidados y respuestas para el cliente</small></div></button>
+    </div>`;
+  app.innerHTML = shell(html, "home");
+}
+
+// ---------------------------------------------------------------- MODO APRENDIZAJE
+
+function screenAprendizaje() {
+  const html = `
+    ${header("Modo Aprendizaje", "El manual completo, parte por parte")}
+    <div class="parte-lista">
+      ${PARTES.map(p => {
+        const prog = progresoParte(p);
+        return `<button class="parte-tile" data-nav="parte:${p.id}">
+          <div class="parte-tile-top">
+            <span class="parte-badge">${p.numero !== null ? "Parte " + p.numero : "Prólogo"}</span>
+            <span class="parte-pct">${prog.pct}%</span>
+          </div>
+          <b>${esc(p.titulo)}</b>
+          <div class="progress-bar sm"><div class="progress-fill" style="width:${prog.pct}%"></div></div>
+        </button>`;
+      }).join("")}
+    </div>`;
+  app.innerHTML = shell(html, "aprendizaje");
+}
+
+async function screenParte(parteId) {
+  const parte = PARTES.find(p => p.id === parteId);
+  if (!parte) return screenAprendizaje();
+
+  const tieneBloque = (tipo) => parte.secciones.some(s => s.contenido.some(b => b.t === tipo));
+  const liveData = {};
+  if (tieneBloque("objeciones-dinamicas")) liveData.objeciones = await getObjeciones();
+  if (tieneBloque("matriz-dinamica")) liveData.matriz = await getMatriz();
+
+  const idxParte = PARTES.findIndex(p => p.id === parteId);
+  const siguiente = PARTES[idxParte + 1];
+  const siguienteHtml = siguiente
+    ? `<button class="siguiente-parte-btn" data-nav="parte:${siguiente.id}">Siguiente: ${esc(siguiente.titulo)} →</button>`
+    : `<button class="siguiente-parte-btn" data-nav="aprendizaje">✓ Completaste el manual — Volver al índice</button>`;
+
+  const html = `
+    ${header(parte.numero !== null ? "Parte " + parte.numero : "Prólogo", parte.titulo, "aprendizaje")}
+    <div class="parte-detalle">
+      ${parte.secciones.map(s => renderSeccionCompleta(s, liveData)).join("")}
+    </div>
+    ${siguienteHtml}`;
+  app.innerHTML = shell(html, "aprendizaje");
+  attachMarcarLeidaHandlers(() => screenParte(parteId));
+  attachAcordeonHandlers();
+}
+
+// ---------------------------------------------------------------- MODO CAMPO
+
+function screenCampo() {
+  const html = `
+    ${header("Modo Campo", "¿Qué estás por hacer ahora?")}
+    <div class="campo-lista">
+      ${ESCENARIOS.map(e => `
+        <button class="campo-tile" data-nav="escenario:${e.id}">
+          <span class="campo-ic">${e.icono}</span>
+          <div><b>${esc(e.titulo)}</b><small>${esc(e.bajada)}</small></div>
+        </button>`).join("")}
+    </div>`;
+  app.innerHTML = shell(html, "campo");
+}
+
+async function screenEscenario(escId) {
+  const esc_ = ESCENARIOS.find(e => e.id === escId);
+  if (!esc_) return screenCampo();
+  app.innerHTML = shell(header(esc_.titulo, "Armando tu resumen…", "campo"), "campo");
+
+  const bloques = esc_.secciones.map(id => SECCIONES_POR_ID[id]).filter(Boolean);
+  const tieneBloqueEsc = (tipo) => bloques.some(s => s.contenido.some(b => b.t === tipo));
+  const liveDataEsc = {};
+  if (tieneBloqueEsc("matriz-dinamica")) liveDataEsc.matriz = await getMatriz();
+  if (tieneBloqueEsc("objeciones-dinamicas")) liveDataEsc.objeciones = await getObjeciones();
+  let objecionesHtml = "";
+  if (esc_.extras.objeciones && esc_.extras.objeciones.length) {
+    const todas = await getObjeciones();
+    const lista = esc_.extras.objeciones === "todas" ? todas : todas.filter(o => esc_.extras.objeciones.includes(o.objecion));
+    objecionesHtml = `<div class="seccion-card"><div class="seccion-head"><h3>Objeciones relacionadas</h3></div><div class="seccion-body">
+        ${lista.map(o => renderObjecionAcordeon(o.objecion, o.detras, o.responder, o.ejemplo, { texto: o.testimonioTexto, autor: o.testimonioAutor }, escId)).join("")}
+      </div></div>`;
+  }
+
+  let herramientaHtml = "";
+  if (esc_.extras.herramienta === "matriz") herramientaHtml = await renderMatrizTool();
+  if (esc_.extras.herramienta === "semaforo") herramientaHtml = renderSemaforoTool();
+  if (esc_.extras.herramienta === "derivacion") herramientaHtml = renderDerivacionTool();
+
+  const html = `
+    ${header(esc_.titulo, esc_.bajada, "campo")}
+    ${herramientaHtml}
+    ${bloques.map(s => renderSeccionCompleta(s, liveDataEsc)).join("")}
+    ${objecionesHtml}
+    ${whatsappCTA()}`;
+  app.innerHTML = shell(html, "campo");
+  attachAcordeonHandlers();
+  attachMarcarLeidaHandlers(() => screenEscenario(escId));
+  attachMatrizHandlers();
+  attachSemaforoHandlers();
+  attachDerivacionHandlers();
+}
+
+// ---------------------------------------------------------------- HERRAMIENTA: MATRIZ
+
+async function renderMatrizTool() {
+  const filas = await getMatriz();
+  return `
+    <div class="tool-card">
+      <div class="tool-head"><span class="tool-ic">📊</span><b>Matriz de Situación</b></div>
+      <p class="tool-hint">Elegí la situación del cliente:</p>
+      <div class="matriz-selector">
+        ${filas.map((f, i) => `<button class="matriz-btn" data-matriz="${i}">${esc(f.situacion)}</button>`).join("")}
+      </div>
+      <div class="matriz-resultado" id="matriz-resultado" data-filas='${esc(JSON.stringify(filas)).replace(/'/g, "&#39;")}'></div>
+    </div>`;
+}
+
+function attachMatrizHandlers() {
+  document.querySelectorAll("[data-matriz]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.getAttribute("data-matriz"), 10);
+      const cont = document.getElementById("matriz-resultado");
+      const filas = JSON.parse(cont.getAttribute("data-filas").replace(/&#39;/g, "'"));
+      const f = filas[idx];
+      document.querySelectorAll(".matriz-btn").forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      cont.innerHTML = `
+        <div class="matriz-card">
+          <div class="mrow"><span class="k">% descuento máximo</span><span class="v">${esc(f.descuento)}</span></div>
+          <div class="mrow"><span class="k">Logística</span><span class="v">${esc(f.logistica)}</span></div>
+          <div class="mrow"><span class="k">Forma de pago</span><span class="v">${esc(f.pago)}</span></div>
+          <div class="mrow"><span class="k">Volumen mínimo</span><span class="v">${esc(f.volumen)}</span></div>
+        </div>`;
+    });
+  });
+}
+
+// ---------------------------------------------------------------- HERRAMIENTA: SEMÁFORO
+
+function renderSemaforoTool() {
+  return `
+    <div class="tool-card">
+      <div class="tool-head"><span class="tool-ic">🚦</span><b>Semáforo de inactividad</b></div>
+      <p class="tool-hint">¿Hace cuántos días que este cliente no compra?</p>
+      <div class="semaforo-input">
+        <input type="number" id="semaforo-dias" min="0" placeholder="Ej: 45" />
+        <button id="semaforo-btn" class="semaforo-check">Ver acción</button>
+      </div>
+      <div id="semaforo-resultado"></div>
+    </div>`;
+}
+
+function attachSemaforoHandlers() {
+  const btn = document.getElementById("semaforo-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const dias = parseInt(document.getElementById("semaforo-dias").value, 10);
+    const out = document.getElementById("semaforo-resultado");
+    if (isNaN(dias)) { out.innerHTML = `<p class="blk-p">Ingresá un número de días.</p>`; return; }
+    let color, accion;
+    if (dias >= 365) { color = "morado"; accion = "Pasa a excliente a recuperar. Primero diagnosticá por qué dejó de comprar (8.3), después ofrecé recuperación según la Matriz de Situación (4.7)."; }
+    else if (dias >= 90) { color = "rojo"; accion = "Se activa el protocolo de cuenta en riesgo: identificá la causa concreta y escalá internamente si hace falta."; }
+    else if (dias >= 60) { color = "naranja"; accion = "Visita presencial puntual, con el objetivo de entender qué pasó, más que de vender en el momento."; }
+    else if (dias >= 30) { color = "amarillo"; accion = "Contacto simple, con tono de chequeo y no de reclamo. Por ejemplo: “¿cómo venís, necesitás algo?”."; }
+    else { color = "verde"; accion = "Todavía está dentro de un ciclo normal. No hace falta ninguna acción especial todavía."; }
+    out.innerHTML = `<div class="semaforo-result semaforo-${color}"><b>${dias} días sin comprar</b><p>${accion}</p></div>`;
+  });
+}
+
+// ---------------------------------------------------------------- HERRAMIENTA: ESTADO DE DERIVACIÓN
+
+function renderDerivacionTool() {
+  return `
+    <div class="tool-card">
+      <div class="tool-head"><span class="tool-ic">📨</span><b>Estado de mi derivación</b></div>
+      <p class="tool-hint">¿Qué día te llegó la derivación formal?</p>
+      <div class="semaforo-input">
+        <input type="date" id="derivacion-fecha" />
+        <button id="derivacion-btn" class="semaforo-check">Ver estado</button>
+      </div>
+      <div id="derivacion-resultado"></div>
+    </div>`;
+}
+
+function attachDerivacionHandlers() {
+  const btn = document.getElementById("derivacion-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const val = document.getElementById("derivacion-fecha").value;
+    const out = document.getElementById("derivacion-resultado");
+    if (!val) { out.innerHTML = `<p class="blk-p">Elegí una fecha.</p>`; return; }
+    const fecha = new Date(val + "T00:00:00");
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const dias = Math.round((hoy - fecha) / 86400000);
+    let color, texto;
+    if (dias < 0) { color = "verde"; texto = "Esa fecha todavía no llegó."; }
+    else if (dias > 10) { color = "rojo"; texto = `Pasaste el plazo de gestión por ${dias - 10} día${dias - 10 === 1 ? "" : "s"}. Reportá igual, con la conclusión a la que llegaste — es mejor que el silencio.`; }
+    else if (dias >= 8) { color = "naranja"; texto = `Te quedan ${10 - dias} día${10 - dias === 1 ? "" : "s"} corridos para gestionar y darle al Ejecutivo Comercial Interno una respuesta concreta.`; }
+    else { color = "verde"; texto = `Estás en plazo: llevás ${dias} de los 10 días corridos. Te quedan ${10 - dias}.`; }
+    out.innerHTML = `<div class="semaforo-result semaforo-${color}"><b>${dias} día${dias === 1 ? "" : "s"} desde la derivación</b><p>${texto}</p></div>`;
+  });
+}
+
+// ---------------------------------------------------------------- MI SEMANA
+
+function screenSemana() {
+  const rutinaChecklist = [
+    "Repasé el semáforo de inactividad de mi cartera",
+    "Tengo agendadas las visitas de cartera según frecuencia (ESTRELLA/VACA cada 2 semanas, DEFENDER mensual, OPORTUNIDAD/NICHO cada 6-8 semanas)",
+    "Aparté un bloque fijo para búsqueda de clientes nuevos",
+    "Definí mis 5 contactos nuevos de la semana",
+    "Definí mis 2 primeras visitas de la semana",
+    "Dejé un día flexible para clientes en riesgo y registro",
+    "Revisé mis derivaciones abiertas y agendé la acción con vencimiento (10 días corridos)",
+    "Reporté el resultado de las derivaciones que ya gestioné",
+  ];
+  const state = getChecklistState("rutina_semanal");
+  const html = `
+    ${header("Mi semana", "Rutina, objeciones de referencia y semáforo")}
+    <div class="seccion-card">
+      <div class="seccion-head"><h3>Checklist de la semana</h3></div>
+      <div class="seccion-body">
+        <ul class="checklist">
+          ${rutinaChecklist.map((txt, i) => `
+            <li class="${state[i] ? "done" : ""}" data-check="${i}">
+              <span class="box"></span><span class="txt">${esc(txt)}</span>
+            </li>`).join("")}
+        </ul>
+      </div>
+    </div>
+    ${renderSemaforoTool()}
+    <div class="seccion-card">
+      <div class="seccion-head"><h3>Objeciones más comunes (referencia rápida)</h3></div>
+      <div class="seccion-body" id="objeciones-referencia">Cargando…</div>
+    </div>
+    ${whatsappCTA()}`;
+  app.innerHTML = shell(html, "semana");
+  attachSemaforoHandlers();
+
+  document.querySelectorAll("[data-check]").forEach(li => {
+    li.addEventListener("click", () => {
+      const idx = li.getAttribute("data-check");
+      toggleChecklistItem("rutina_semanal", idx);
+      li.classList.toggle("done");
+    });
+  });
+
+  getObjeciones().then(lista => {
+    const cont = document.getElementById("objeciones-referencia");
+    if (!cont) return;
+    cont.innerHTML = lista.map(o => renderObjecionAcordeon(o.objecion, o.detras, o.responder, o.ejemplo, { texto: o.testimonioTexto, autor: o.testimonioAutor }, "semana")).join("");
+    attachAcordeonHandlers();
+  });
+}
+
+// ---------------------------------------------------------------- PRODUCTOS
+
+// Texto entre [corchetes] = dato a confirmar con el molino
+function escProd(s) { return esc(s).replace(/\[([^\]]+)\]/g, '<em class="prod-nota">$1</em>'); }
+
+function renderBloqueProducto(b) {
+  let h = "";
+  switch (b.t) {
+    case "p": h = `<p class="blk-p">${escProd(b.x)}</p>`; break;
+    case "label": h = `<div class="blk-label">${esc(b.x)}</div>`; break;
+    case "bullets": h = `<ul class="blk-bullets">${b.x.map(i => `<li>${escProd(i)}</li>`).join("")}</ul>`; break;
+    case "callout": h = `<div class="blk-callout tip"><span class="blk-callout-ic">${b.tipo === "argumento" ? "💪" : "🧠"}</span>
+        <div><strong>${b.tipo === "argumento" ? "Argumento de venta" : "Para tener en cuenta"}</strong> — ${escProd(b.x)}</div></div>`; break;
+    case "pasos": h = `<div class="timeline">${b.x.map(([t, d], i) => `
+        <div class="timeline-step"><div class="timeline-dot">${i + 1}</div>
+        <div class="timeline-content"><b>${esc(t)}</b><small>${escProd(d)}</small></div></div>`).join("")}</div>`; break;
+    case "tabla": h = `<div class="blk-table-wrap"><table class="blk-table prod-tabla">
+        <thead><tr>${b.h.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+        <tbody>${b.f.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; break;
+    case "qa": objAccCounter++; h = `<div class="acc-item"><button class="acc-head" data-toggle="obj-${objAccCounter}"><span>${esc(b.q)}</span><span class="acc-arrow">▾</span></button>
+        <div class="acc-body" id="obj-${objAccCounter}"><p>${escProd(b.a)}</p></div></div>`; break;
+  }
+  return b.v ? `<div class="prod-validar"><span class="prod-validar-tag">A confirmar con el molino</span>${h}</div>` : h;
+}
+
+function screenProductos() {
+  const html = `
+    ${header("Productos", "Del campo al plato, para negociar con conocimiento")}
+    <p class="prod-intro">Repasá <b>En 30 segundos</b> antes de una reunión o buscá la respuesta en <b>Preguntas del cliente</b> cuando te consulten algo.</p>
+    <div class="prod-lista">
+      ${FAMILIAS.filter(f => PRODUCTOS.some(p => p.familia === f.id)).map(f => `
+        <div class="prod-familia">${esc(f.titulo)}</div>
+        ${PRODUCTOS.filter(p => p.familia === f.id).map(p => `
+          <button class="campo-tile prod-tile" data-nav="producto:${p.id}">
+            <img src="${p.img}" alt="" />
+            <div><b>${esc(p.nombre)}</b><small>${esc(p.bajada)}</small></div>
+          </button>`).join("")}`).join("")}
+      <p class="prod-proximamente">Se van sumando productos de a uno.</p>
+    </div>`;
+  app.innerHTML = shell(html, "productos");
+}
+
+function screenProducto(id) {
+  const p = PRODUCTOS.find(x => x.id === id);
+  if (!p) return screenProductos();
+  const etapas = ETAPAS.filter(e => p.etapas[e.id]);
+  const msg = encodeURIComponent(`Pregunta sobre ${p.nombre} que no está en la herramienta:\n\nCliente / rubro: \nQué me preguntó: \n\n(completá y enviá)`);
+  const html = `
+    ${header(p.nombre, p.bajada, "productos")}
+    <div class="prod-hero"><img src="${p.img}" alt="${esc(p.nombre)}" /></div>
+    <nav class="prod-etapas">${etapas.map(e => `<button data-ir="${e.id}">${e.icono} ${esc(e.titulo)}</button>`).join("")}</nav>
+    <div class="parte-detalle">
+      ${etapas.map(e => `
+        <div class="seccion-card ${e.id === "resumen" ? "prod-resumen" : ""}" id="etapa-${e.id}">
+          <div class="seccion-head"><span class="prod-etapa-ic">${e.icono}</span><h3>${esc(e.titulo)}</h3></div>
+          <div class="seccion-body">${p.etapas[e.id].map(renderBloqueProducto).join("")}</div>
+        </div>`).join("")}
+    </div>
+    <a class="wa-cta" href="${WA_BASE}?text=${msg}" target="_blank" rel="noopener">
+      <span class="wa-ic">💬</span>
+      <div><b>¿Te preguntaron algo que no está acá?</b><small>Mandalo por WhatsApp y lo sumamos</small></div>
+    </a>`;
+  app.innerHTML = shell(html, "productos");
+  attachAcordeonHandlers();
+  document.querySelectorAll("[data-ir]").forEach(btn => btn.addEventListener("click", () => {
+    const el = document.getElementById("etapa-" + btn.getAttribute("data-ir"));
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64, behavior: "smooth" });
+  }));
+  const nav = document.querySelector(".prod-etapas");
+  if (nav && "IntersectionObserver" in window) {
+    const io = new IntersectionObserver(ents => ents.forEach(en => {
+      if (!en.isIntersecting) return;
+      const id = en.target.id.replace("etapa-", "");
+      nav.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.getAttribute("data-ir") === id));
+      const act = nav.querySelector(`[data-ir="${id}"]`);
+      if (act) nav.scrollTo({ left: act.offsetLeft - 16, behavior: "smooth" });
+    }), { rootMargin: "-80px 0px -65% 0px" });
+    document.querySelectorAll("[id^='etapa-']").forEach(s => io.observe(s));
+  }
+  if (abrirEtapa) {
+    const el = document.getElementById("etapa-" + abrirEtapa);
+    abrirEtapa = null;
+    if (el) setTimeout(() => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 64 }), 50);
+  }
+}
+let abrirEtapa = null;
+
+// ---------------------------------------------------------------- WHATSAPP CTA
+
+function whatsappCTA() {
+  const msg = encodeURIComponent("Objeción nueva para el manual:\n\nCliente / rubro: \nQué me dijo: \nCómo respondí: \n\n(completá y enviá)");
+  return `
+    <a class="wa-cta" href="${WA_BASE}?text=${msg}" target="_blank" rel="noopener">
+      <span class="wa-ic">💬</span>
+      <div><b>¿Tu cliente te dijo algo que no está acá?</b><small>Compartilo por WhatsApp con el equipo</small></div>
+    </a>`;
+}
+
+// ---------------------------------------------------------------- BUSCADOR
+
+function screenBuscador(query) {
+  query = query || "";
+  const html = `
+    ${header("Buscar", "Encontrá cualquier tema del manual y de los productos")}
+    <div class="buscador-box">
+      <input type="text" id="buscador-input" placeholder="Ej: góndola, precio, remojo, cosecha…" value="${esc(query)}" />
+    </div>
+    <div id="buscador-resultados">${query ? renderResultadosBusqueda(query) : `<p class="buscador-hint">Escribí una palabra para empezar.</p>`}</div>`;
+  app.innerHTML = shell(html, "buscador");
+
+  const input = document.getElementById("buscador-input");
+  input.focus();
+  input.addEventListener("input", () => {
+    document.getElementById("buscador-resultados").innerHTML = renderResultadosBusqueda(input.value);
+    attachMarcarLeidaHandlers(() => screenBuscador(input.value));
+  });
+}
+
+function renderResultadosBusqueda(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return `<p class="buscador-hint">Escribí una palabra para empezar.</p>`;
+  const resultados = [];
+  PARTES.forEach(parte => {
+    parte.secciones.forEach(sec => {
+      const textoPlano = JSON.stringify(sec.contenido).toLowerCase() + " " + sec.titulo.toLowerCase();
+      if (textoPlano.includes(q)) resultados.push({ parte, sec });
+    });
+  });
+  const resultadosProd = [];
+  PRODUCTOS.forEach(p => ETAPAS.forEach(e => {
+    const bloques = p.etapas[e.id];
+    if (bloques && (JSON.stringify(bloques) + " " + p.nombre).toLowerCase().includes(q)) resultadosProd.push({ p, e });
+  }));
+  if (!resultados.length && !resultadosProd.length) return `<p class="buscador-hint">Sin resultados para “${esc(q)}”.</p>`;
+  return resultadosProd.map(({ p, e }) => `
+    <div class="resultado-item" data-nav="producto:${p.id}:${e.id}">
+      <span class="resultado-parte">🌾 ${esc(p.nombre)}</span>
+      <b>${e.icono} ${esc(e.titulo)}</b>
+    </div>`).join("") + resultados.map(({ parte, sec }) => `
+    <div class="resultado-item" data-nav="parte:${parte.id}">
+      <span class="resultado-parte">${parte.numero !== null ? "Parte " + parte.numero : "Prólogo"} · ${sec.id.match(/^\d/) ? sec.id : ""}</span>
+      <b>${esc(sec.titulo)}</b>
+    </div>`).join("");
+}
+
+// ---------------------------------------------------------------- HANDLERS COMUNES
+
+function attachAcordeonHandlers() {
+  document.querySelectorAll("[data-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-toggle");
+      const body = document.getElementById(id);
+      const item = btn.closest(".acc-item");
+      const open = item.classList.contains("open");
+      document.querySelectorAll(".acc-item.open").forEach(i => { i.classList.remove("open"); i.querySelector(".acc-body").style.maxHeight = null; });
+      if (!open) { item.classList.add("open"); body.style.maxHeight = body.scrollHeight + 20 + "px"; }
+    });
+  });
+}
+
+function attachMarcarLeidaHandlers(rerender) {
+  document.querySelectorAll("[data-marcar]").forEach(btn => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      toggleSeccionLeida(btn.getAttribute("data-marcar"));
+      if (rerender) rerender();
+    });
+  });
+}
+
+// ---------------------------------------------------------------- ACCESO (PIN)
+
+function screenBloqueo() {
+  app.innerHTML = `
+    <div class="lock-screen">
+      <div class="lock-card">
+        <div class="lock-ic">🔒</div>
+        <h1>Egran</h1>
+        <p>Ingresá el PIN del equipo comercial para entrar.</p>
+        <input type="password" inputmode="numeric" id="lock-pin" placeholder="PIN" autofocus />
+        <button id="lock-btn">Entrar</button>
+        <p id="lock-error" class="lock-error"></p>
+      </div>
+    </div>`;
+  const intentar = () => {
+    const val = document.getElementById("lock-pin").value.trim();
+    if (val && val === CONFIG.pinAcceso) {
+      desbloquearApp();
+      router();
+    } else {
+      document.getElementById("lock-error").textContent = "PIN incorrecto. Probá de nuevo.";
+    }
+  };
+  document.getElementById("lock-btn").addEventListener("click", intentar);
+  document.getElementById("lock-pin").addEventListener("keydown", (ev) => { if (ev.key === "Enter") intentar(); });
+  document.getElementById("lock-pin").focus();
+}
+
+function checkAccess() {
+  if (appDesbloqueada()) { router(); return; }
+  screenBloqueo();
+}
+
+// ---------------------------------------------------------------- ROUTER
+
+function router() {
+  const hash = location.hash.slice(1) || "home";
+  const [screen, param, extra] = hash.split(":");
+  window.scrollTo(0, 0);
+  if (screen === "productos") return screenProductos();
+  if (screen === "producto") { abrirEtapa = extra || null; return screenProducto(param); }
+  if (screen === "home") return screenHome();
+  if (screen === "aprendizaje") return screenAprendizaje();
+  if (screen === "parte") return screenParte(param);
+  if (screen === "campo") return screenCampo();
+  if (screen === "escenario") return screenEscenario(param);
+  if (screen === "semana") return screenSemana();
+  if (screen === "buscador") return screenBuscador(param ? decodeURIComponent(param) : "");
+  return screenHome();
+}
+
+document.addEventListener("click", (ev) => {
+  const navEl = ev.target.closest("[data-nav]");
+  if (navEl) { location.hash = navEl.getAttribute("data-nav"); }
+});
+
+window.addEventListener("hashchange", () => { if (appDesbloqueada()) router(); });
+window.addEventListener("DOMContentLoaded", checkAccess);
